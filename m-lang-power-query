@@ -1,0 +1,80 @@
+let
+    // Reading the source text
+    Source = Text.FromBinary(File.Contents("C:\Users\.txt")),
+    
+    // To divide into lines
+    SplitIntoRows = Text.Split(Source, "#(cr,lf)"),
+    
+    // Convert a list to a table
+    ConvertToTable = Table.FromList(SplitIntoRows, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
+    
+    // Delete unnecessary blank lines
+    RemoveEmptyRows = Table.SelectRows(ConvertToTable, each [Column1] <> ""),
+    
+    // to Parsing
+    ParsedData = List.Generate(
+        () => [
+            Index = 0,
+            Record = null
+        ],
+        each [Index] < Table.RowCount(RemoveEmptyRows),
+        each [
+            Index = [Index] + 1,
+            Record = if Text.StartsWith(RemoveEmptyRows[Column1]{[Index]}, "browser:") then
+                let
+                    CurrentIndex = [Index],
+                    NextRows = List.Range(RemoveEmptyRows[Column1], CurrentIndex, 8),  // We turned it back to 8
+                    GetValue = (text, prefix) => 
+                        let 
+                            MatchingRows = List.Select(NextRows, each Text.StartsWith(_, prefix)),
+                            Value = if List.Count(MatchingRows) = 0 then
+                                    if prefix = "url:" then "NULL"
+                                    else if prefix = "path:" then "NULL"
+                                    else ""
+                                else 
+                                    let
+                                        ExtractedValue = Text.Trim(Text.AfterDelimiter(MatchingRows{0}, ":"))
+                                    in
+                                        if prefix = "url:" and Text.StartsWith(ExtractedValue, "browser:") then "URL nothing!"
+                                        else ExtractedValue
+                        in 
+                            Value
+                in
+                [
+                    Browser = GetValue(NextRows, "browser:"),
+                    Profile = GetValue(NextRows, "profile:"),
+                    WebAppURL = GetValue(NextRows, "url:"),
+                    InstalledAppPath = GetValue(NextRows, "path:"),
+                    Username = GetValue(NextRows, "login:"),
+                    Password = GetValue(NextRows, "password:")
+                ]
+            else
+                null
+        ],
+        each [Record]
+    ),
+    
+    // Null was used in the lines here to delete it
+    FilteredRecords = List.Select(ParsedData, each _ <> null),
+    TableFromRecords = Table.FromRecords(FilteredRecords),
+    
+    // fix column sorting
+    ReorderedColumns = Table.ReorderColumns(TableFromRecords,{"Browser", "Profile", "WebAppURL", "InstalledAppPath", "Username", "Password"}),
+    
+    // correct column names
+    RenamedColumns = Table.RenameColumns(ReorderedColumns,{
+        {"WebAppURL", "Web App URL"},
+        {"InstalledAppPath", "Installed App Path"}
+    }),
+    
+    // clear the data and write the columns 
+    CleanedData = Table.TransformColumns(RenamedColumns, {
+        {"Browser", each Text.Trim(_)},
+        {"Profile", each Text.Trim(_)},
+        {"Web App URL", each Text.Trim(_)},
+        {"Installed App Path", each Text.Trim(_)},
+        {"Username", each Text.Trim(_)},
+        {"Password", each Text.Trim(_)}
+    })
+in
+    CleanedData
